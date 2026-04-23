@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: system_pulse_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: system_pulse
+      POSTGRES_USER: system_pulse_user
+      POSTGRES_PASSWORD: system_pulse_password
+    ports:
+      - "1488:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["SHELL tipo hacker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

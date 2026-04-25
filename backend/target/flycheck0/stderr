@@ -1,0 +1,10 @@
+    Updating crates.io index
+error: failed to select a version for `sqlx`.
+    ... required by package `system-pulse v0.1.0 (C:\Users\ismLint\system-pulse\backend)`
+versions that meet the requirements `^0.8.6` are: 0.8.6
+
+package `system-pulse` depends on `sqlx` with feature `tls-rust` but `sqlx` does not have that feature.
+ package `sqlx` does have feature `tls-rustls`
+
+
+failed to select a version for `sqlx` which could resolve this conflict

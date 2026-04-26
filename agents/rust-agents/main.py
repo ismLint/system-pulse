@@ -4,7 +4,6 @@ from datetime import datetime, time
 import time
 import psutil
 import uvicorn
-import maturin
 import httpx
 
 
@@ -28,6 +27,7 @@ def get_metric():
     mem = psutil.virtual_memory()
     cpu = psutil.cpu_percent(interval=1)
     disk = psutil.disk_usage('/')
+
 
     return {
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -57,11 +57,17 @@ def agent_run():
             with httpx.Client() as client:
                 response = client.post(destination_url, json=payload, timeout=1)
 
-                if response.status_code != 200:
+                if response.status_code == 200:
                     print('agent succeed')
 
-                else:
-                    print(f'agent failed: {response.status_code}')
+                elif response.status_code == 404:
+                    print('error')
+
+                elif response.status_code == 500:
+                    print('server-side error')
+
+                elif response.status_code == 505:
+                    print('no server found error')
 
         except (httpx.ConnectError, httpx.ConnectTimeout):
             print('server unavailable')

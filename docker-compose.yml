@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -13,7 +15,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["SHELL tipo hacker"]
+      test: ["CMD-SHELL", "pg_isready -U system_pulse_user -d system_pulse"]
       interval: 5s
       timeout: 5s
       retries: 10

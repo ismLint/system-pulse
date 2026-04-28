@@ -11,23 +11,11 @@ import httpx
 app = FastAPI()
 destination_url = 'http://127.0.0.1:8080'
 
-
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:8000/metrics"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-
-
 @app.get('/metrics')
 def get_metric():
     mem = psutil.virtual_memory()
     cpu = psutil.cpu_percent(interval=1)
     disk = psutil.disk_usage('/')
-
 
     return {
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -46,34 +34,35 @@ def get_metric():
 
     }
 
-
 def agent_run():
     print("Starting agent")
+    batch = []
 
     while True:
-        payload = get_metric()
+        current_metric = get_metric()
+        batch.append(current_metric)
 
-        try:
-            with httpx.Client() as client:
-                response = client.post(destination_url, json=payload, timeout=1)
+        if len(batch) == 10:
+            print(f'reached {len(batch)} metrics. sending metrics to server')
 
-                if response.status_code == 200:
-                    print('agent succeed')
+            try:
+                with httpx.Client() as client:
+                    response = client.post(destination_url, json={'metrics':batch}, timeout=5)
+                    if response.status_code == 200:
+                        print('metrics sent to server')
+                        batch = []
+                    elif response.status_code == 404:
+                        print('error sending to server')
+                    elif response.status_code == 500:
+                        print('server-side error')
+                    elif response.status_code == 505:
+                        print('server not found')
 
-                elif response.status_code == 404:
-                    print('error')
 
-                elif response.status_code == 500:
-                    print('server-side error')
+            except (httpx.ConnectTimeout, httpx.ConnectTimeout):
+                print('connection error')
 
-                elif response.status_code == 505:
-                    print('no server found error')
-
-        except (httpx.ConnectError, httpx.ConnectTimeout):
-            print('server unavailable')
-
-        time.sleep(1)
-
+            time.sleep(1)
 
 if __name__ == '__main__':
     try:
@@ -83,5 +72,4 @@ if __name__ == '__main__':
         exit(0)
 
 
-# if __name__ == '__main__':
-#     uvicorn.run(app, host='0.0.0.0', port=8000)
+

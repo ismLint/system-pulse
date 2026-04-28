@@ -14,7 +14,17 @@ CREATE TABLE IF NOT EXISTS servers (
   port INTEGER NOT NULL CHECK (port > 0 AND port <= 65535),
   status VARCHAR(32) NOT NULL DEFAULT 'unknown',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (host, port)
+);
+
+CREATE TABLE IF NOT EXISTS metrics (
+  id BIGSERIAL PRIMARY KEY,
+  server_id BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  cpu_usage DOUBLE PRECISION NOT NULL,
+  ram_usage DOUBLE PRECISION NOT NULL,
+  cpu_temp REAL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_servers_owner_user_id ON servers(owner_user_id);

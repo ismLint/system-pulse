@@ -1,12 +1,10 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, time
 import time
 import psutil
 import uvicorn
 import httpx
-
-
+from random import randint, random
 
 app = FastAPI()
 destination_url = 'http://127.0.0.1:8080'
@@ -16,10 +14,13 @@ def get_metric():
     mem = psutil.virtual_memory()
     cpu = psutil.cpu_percent(interval=1)
     disk = psutil.disk_usage('/')
+    session_id = randint(1, 256)
+
 
     return {
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'cpu_usage': cpu,
+        'id': session_id,
         'memory_usage': {
             'total': mem.total,
             'used': mem.used,
@@ -47,7 +48,7 @@ def agent_run():
 
             try:
                 with httpx.Client() as client:
-                    response = client.post(destination_url, json={'metrics':batch}, timeout=5)
+                    response = client.post(destination_url, json={'id: ': id(256), 'metrics: ':batch}, timeout=5)
                     if response.status_code == 200:
                         print('metrics sent to server')
                         batch = []

@@ -43,7 +43,7 @@
 
 ## 🔧 Установка и запуск
 
-### 1. Сборка Rust агента
+### Сборка и автоматический запуск
 ```bash
 cd system-pulse
 docker compose up --build

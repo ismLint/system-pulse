@@ -1,48 +1,21 @@
-import {useEffect,useState} from "react";
+import { useState, useEffect } from "react";
 
-export function useWebSocket(serverId:number){
+type ServerInfo = {
+  server_id: number;
+  server_name: string;
+  status: string;
+};
 
-  const [cpu,setCpu]=useState(0);
-  const [ram,setRam]=useState(0);
-  const [disk,setDisk]=useState(0);
-  const [status,setStatus]=useState("не подключен");
+export function useStats() {
+  const [server, setServer] = useState<ServerInfo | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() =>{
-    const socket=new WebSocket("ws://localhost:8765");
+  useEffect(() => {
+    setTimeout(() => {
+      setServer({ server_id: 0, server_name: "Мой сервер", status: "online" });
+      setLoading(false);
+    }, 300);
+  }, []);
 
-
-    socket.onopen=()=> {                             //успешное подключение к серверу
-      setStatus("подключен");
-      socket.send(JSON.stringify({ 
-        action:"subscribe", 
-        server_id:serverId 
-      }));
-    };
-
-    socket.onmessage=(event)=> {                    // приход данных
-      const data= JSON.parse(event.data);
-      
-      if (data.server_id === serverId) {
-        setCpu(data.cpu);
-        setRam(data.ram);
-        setDisk(data.disk_free_gb);
-      }
-    };
-
-    socket.onclose=() => {
-      setStatus("отключен");
-    };
-
-    return() => {
-      socket.close();
-    };
-
-  },[serverId]);
-
-  return {
-    cpu: cpu,
-    ram: ram,
-    disk: disk,
-    status: status
-  };
+  return { server, loading };
 }

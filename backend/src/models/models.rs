@@ -1,67 +1,30 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Seriaize};
-
-// User List
-#[derive(Debug, Serialize, Deserialize, Clone, PatialEq, sqlx::Type)]
-#[sql(rename_all = "lowercase")]
-pub enum UserRole {
-    User,
-    Admin,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
-pub struct User {
-    pub id: i64,
-    pub email: String,
-    pub password_hash: String,
-    pub role: String,
-    pub tier: SubsciptionTier,
-    pub subscription_ends_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
-
-// Agent Section
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MemoryUsage {
-    pub total: u64,
-    pub used: u64,
-    pub free: u64,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DiskUsage {
-    pub total: u64,
-    pub used: u64,
-    pub free: u64,
+pub struct ProcessInfo {
+    pub name: String,
+    pub pid: u32,
+    pub cpu_usage: f64,
+    pub mem_usage: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IncomingPacket {
-    pub id: i64,
+    pub server_id: i32,
     pub cpu_usage: f64,
-    pub cpu_temp: Option<f32>,
-    pub memory_usage: MemoryUsage,
-    pub disk_usage: DiskUsage,
-    pub timestamp: String,
+    pub ram_usage: f64,
+    pub memory_total: f64,
+    pub memory_used: f64,
+    pub cpu_temp: Option<f64>,
+    pub top_processes: Vec<ProcessInfo>,
 }
 
-//Status Area
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, sqlx::Type)]
-#[sqlx(rename_all = "lowercase")]
-pub enum HealthStatus {
-    Healthy,
-    Warning,
-    Critical,
-    Offline,
-    Unknow,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
-pub struct Server {
-    pub id: i64,
-    pub owner_user_id: i64,
+#[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
+pub struct ServerStatus {
+    pub id: i32,
     pub name: String,
-    pub host: String,
-    pub port: i32,
-    pub status: HealthStatus,
+    pub status: String,
+    pub updated_at: DateTime<Utc>,
 }

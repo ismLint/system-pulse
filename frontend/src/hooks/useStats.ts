@@ -1,55 +1,69 @@
-import {useState,useEffect,useRef} from "react";
+// @ts-ignore
+import { useState, useEffect } from "react";
 
-export type Point ={ time:string;cpu:number;ram:number};
-export type Server ={id:number;name:string;status:string;points:Point[]};
+export type ServerInfo = {
+  server_id: number;
+  server_name: string;
+  status: string;
+  cpu_usage?: number;
+  ram_usage?: number;
+  cpu_temperature?: number;
+};
 
-export function useStats(url:string){
-  const[servers,setServers]=useState<Server[]>([]);
-  const[connected,setConnected]=useState(false);
-
-  const cache = useRef<Record<number, Server>>({});           //хранение истории
+export function useStats() {
+  const [server, setServer] = useState<ServerInfo | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ws = new WebSocket(url);                            //соединение с сервером
+    const token = localStorage.getItem('token') || 'debug_token_2026';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-    ws.onopen = () => setConnected(true);                     //успешно установлено
+    // 1. Обязательно сначала ОБЪЯВЛЯЕМ wsUrl через const
+    const wsUrl = `${wsProtocol}//localhost:8080/api/ws?token=${encodeURIComponent(token)}`;
 
-    ws.onclose = () => setConnected(false);                   //закрылось соединение
+    // 2. Только ПОСЛЕ этого логируем и используем
+    console.log("Попытка сокет-соединения с:", wsUrl);
 
-    ws.onmessage = (e) => {                                   //соо от сервера
-      const list = JSON.parse(e.data);
-      
+    const socket = new WebSocket(wsUrl);
 
-      for (const m of list) {
-        const old = cache.current[m.server_id];
-
-        const newPoint = {                                    //новая точка для графика
-          time: new Date(m.time).toLocaleTimeString(),        
-          cpu: m.cpu,
-          ram: m.ram,
-        };
-
-        const points=old?[...old.points,newPoint] : [newPoint];
-
-        cache.current[m.server_id]={                        //хранение последних 30 точек
-          id: m.server_id,
-          name: m.server_name,
-          status: m.status,
-          points: points.slice(-30),
-        };
-      }
-
-      setServers(Object.values(cache.current));                //обновление списка серверов
+    socket.onopen = () => {
+      console.log("WebSocket успешно подключен к Axum!");
+      setConnected(true);
+      setLoading(false);
     };
 
-    return () => ws.close();                                   //закрыть соединение
-  }, [url]);
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setServer(data);
+      } catch (error) {
+        console.error("Ошибка парсинга JSON:", error);
+      }
+    };
 
-  return { servers, connected };
+    socket.onerror = (error) => {
+      console.error("Ошибка WebSocket:", error);
+    };
+
+    socket.onclose = (event) => {
+      console.log(`WebSocket закрыт. Код: ${event.code}`);
+      setConnected(false);
+      setLoading(true);
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, []);
+
+  // Адаптируем под интерфейс App.tsx: возвращаем массив серверов, если данные пришли
+  const servers = server ? [{
+    id: server.server_id,
+    name: server.server_name,
+    status: server.status,
+    points: [{ cpu: server.cpu_usage || 0, ram: server.ram_usage || 0 }]
+  }] : [];
+
+  return { servers, connected, loading };
 }
-
-
-
-//toLocaleTimeString — метод экземпляра объекта Date в JavaScript,
-//который возвращает строку, содержащую зависимое от языка представление
-//времени этой даты в локальном часовом поясе

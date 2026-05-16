@@ -1,35 +1,22 @@
-use crate::models::models::{HealthStatus, IncomingPacket};
+use crate::models::IncomingPacket;
 
 pub struct Analyzer;
 
 impl Analyzer {
-    pub fn analyze_packet(packet: &IncomingPacket) -> HealthStatus {
-        // check critical cpu > 90% or ram > 90%
-        if packet.cpu_usage >= 90.0 || Self::calculate_ram_usage_pct(packet) >= 90.0 {
-            return HealthStatus::Critical;
-        }
-
-        // check warning cpu > 75% or ram > 80%
-        if packet.cpu_usage >= 75.0 || Self::calculate_ram_usage_pct(packet) >= 80.0 {
-            return HealthStatus::Warning;
-        }
-
-        // if temperature > 80C* == warning
+    pub fn determine_status(packet: &IncomingPacket) -> &'static str {
+        // Evaluate host hardware status based on safety thresholds
         if let Some(temp) = packet.cpu_temp {
-            if temp >= 80.0 {
-                return HealthStatus::Warning;
-            }
+            if temp > 85.0 { return "Critical"; }
+            if temp > 75.0 { return "Warning"; }
         }
 
-        // all more == ok
-        HealthStatus::Healthy
-    }
-
-    // for calculate usage ram
-    fn calculate_ram_usage_pct(packet: &IncomingPacket) -> f64 {
-        if packet.memory_usage.total == 0 {
-            return 0.0;
+        if packet.cpu_usage > 90.0 || packet.ram_usage > 90.0 {
+            return "Critical";
         }
-        (packet.memory_usage.used as f64 / packet.memory_usage.total as f64) * 100
+        if packet.cpu_usage > 70.0 || packet.ram_usage > 70.0 {
+            return "Warning";
+        }
+
+        "Healthy"
     }
 }

@@ -1,29 +1,38 @@
 import os
-from http.client import responses
-
-from fastapi import FastAPI
-from datetime import datetime, time
-import time
+import asyncio
+from datetime import datetime
 import psutil
-import uvicorn
 import httpx
-from random import randint, random
+from random import randint
+from fastapi import FastAPI
 
 app = FastAPI()
-destination_url = 'http://127.0.0.1:8080'
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080")
+DESTINATION_URL = f"{BACKEND_URL}/api/metrics"
+
+SERVER_ID = 1
+
+def write_log(message: str):
+    """Безопасное логирование в файл"""
+    try:
+        os.makedirs("logs", exist_ok=True)
+        with open("logs/agent_logs.json", "a", encoding="utf-8") as log_file:
+            log_file.write(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} - {message}\n')
+    except Exception as e:
+        print(f"Ошибка записи лога: {e}")
 
 @app.get('/metrics')
-def get_metric():
+def get_metric_endpoint():
+    """Эндпоинт FastAPI (если фронт захочет дергать агент напрямую)"""
     mem = psutil.virtual_memory()
-    cpu = psutil.cpu_percent(interval=1)
+    cpu = psutil.cpu_percent(interval=None)
     disk = psutil.disk_usage('/')
-    session_id = randint(1, 256)
-
 
     return {
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'server_id': SERVER_ID,
         'cpu_usage': cpu,
-        'id': session_id,
         'memory_usage': {
             'total': mem.total,
             'used': mem.used,
@@ -34,85 +43,92 @@ def get_metric():
             'used': disk.used,
             'free': disk.free,
         }
-
-
     }
-def Logger(flag):
-    logging = open(logs/agent_logs.json)
-    if flag == 'agent_run':
-        logging.write(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}: {response.status_code}: {response.text}')
 
-    elif flag == 'critical_processes':
-        logging.write(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, no such process')
+async def send_to_server(client: httpx.AsyncClient, payload: dict):
+    """Общая функция отправки данных на Rust-бэкенд"""
+    try:
+        response = await client.post(DESTINATION_URL, json=payload, timeout=5)
+        log_msg = f"Отправка на {DESTINATION_URL}. Статус: {response.status_code}"
+        print(log_msg)
+        write_log(log_msg)
+    except httpx.ConnectError:
+        print(f"Ошибка подключения к бэкенду {DESTINATION_URL}")
+        write_log("Ошибка подключения: Сервер недоступен")
+    except httpx.TimeoutException:
+        print("Таймаут при отправке метрик")
 
-def agent_run():
-    print("Starting agent")
+async def agent_run_loop(client: httpx.AsyncClient):
+    """Асинхронный цикл сбора системных метрик"""
+    print("Запущен сбор системных метрик...")
     batch = []
 
     while True:
-        current_metric = get_metric()
-        batch.append(current_metric)
+        mem = psutil.virtual_memory()
+        cpu = psutil.cpu_percent(interval=None)
+        disk = psutil.disk_usage('/')
 
-        if len(batch) == 10:
-            print(f'reached {len(batch)} metrics. sending metrics to server')
+        metric = {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'server_id': SERVER_ID,
+            'cpu_usage': cpu,
+            'memory_used': mem.used,
+            'memory_total': mem.total,
+            'disk_used': disk.used,
+            'disk_total': disk.total
+        }
 
+        batch.append(metric)
+
+        if len(batch) >= 10:
+            print(f'Батч системных метрик заполнен ({len(batch)}). Отправка...')
+            payload = {
+                'server_id': SERVER_ID,
+                'metrics': batch
+            }
+            await send_to_server(client, payload)
+            batch = []
+
+        await asyncio.sleep(1)
+
+async def critical_processes_loop(client: httpx.AsyncClient):
+    """Асинхронный цикл сбора топ-процессов по CPU"""
+    print("Запущен мониторинг топ-процессов...")
+
+    while True:
+        process_list = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
             try:
-                with httpx.Client() as client:
-                    response = client.post(destination_url, json={'id: ': id(256), 'metrics: ':batch}, timeout=5)
-                    if response.status_code == 200:
-                        print('metrics sent to server')
-                        batch = []
-                    elif response.status_code == 404:
-                        print('error sending to server')
-                    elif response.status_code == 500:
-                        print('server-side error')
-                    elif response.status_code == 505:
-                        print('server not found')
+                if proc.info['cpu_percent'] > 0.0:
+                    process_list.append({
+                        'pid': proc.info['pid'],
+                        'name': proc.info['name'],
+                        'cpu_percent': proc.info['cpu_percent'],
+                        'memory_percent': proc.info['memory_percent']
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
+        sorted_processes = sorted(process_list, key=lambda x: x['cpu_percent'], reverse=True)[:5]
 
-            except (httpx.ConnectTimeout, httpx.ConnectTimeout):
-                print('connection error')
+        if sorted_processes:
+            payload = {
+                'server_id': SERVER_ID,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'top_processes': sorted_processes
+            }
+            await send_to_server(client, payload)
+        await asyncio.sleep(5)
 
-
-
-            time.sleep(1)
-
-def critical_processes():
-    batch = []
-    process_list =[]
-    while True:
-        process = psutil.Process(os.getpid())
-        process_list.append(process)
-        try:
-            for process in psutil.process_iter(['pid', 'cpu_percent']):
-                process_list.append(process.info)
-                sorted_process_list = sorted(process_list, key=lambda process: process.info['cpu_percent'],
-                                             reverse=True)
-                batch.append(sorted_process_list)
-                if len(batch) == 10:
-                    print(f'reached {len(batch)} metrics. sending metrics to server')
-                    try:
-                        with httpx.Client() as client:
-                            response = client.post(destination_url, json={'id: ': id(256), 'metrics: ': batch},
-                                                   timeout=5)
-                            if response.status_code == 200:
-                                print('metrics sent to server')
-                                batch = []
-                    except (httpx.ConnectTimeout, httpx.ConnectTimeout):
-                        print('connection error')
-
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            print('no such process')
-
-
+async def main():
+    async with httpx.AsyncClient() as client:
+        await asyncio.gather(
+            agent_run_loop(client),
+            critical_processes_loop(client)
+        )
 
 if __name__ == '__main__':
     try:
-        agent_run()
-        critical_processes()
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print('stopped by user')
-        exit(0)
-
-
-
+        print('Агент остановлен пользователем')

@@ -1,0 +1,83 @@
+//@ts-ignore
+import React from 'react';
+import { useStats } from './hooks/useStats';
+
+function App() {
+const { servers, connected } = useStats();
+
+    return (
+    <div className="dashboard-container">
+
+{/* Наша шапка с кнопками и статусом */}
+<header className="header">
+<h2 style={{ margin: 0 }}>System Pulse Monitor</h2>
+
+{/* Блок кнопок Входа и Регистрации, о которых ты просил */}
+<div className="auth-buttons-container">
+<button className="btn btn-register" onClick={() => alert('Переход на регистрацию')}>Регистрация</button>
+<button className="btn btn-login" onClick={() => alert('Открытие формы входа')}>Войти</button>
+</div>
+
+{/* Индикатор WebSocket */}
+<span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
+                                                                            {connected ? 'Connected' : 'Disconnected'}
+</span>
+</header>
+
+{/* Вызов функции рендера */}
+{loading_placeholder(servers, connected)}
+
+</div>
+);
+}
+
+function loading_placeholder(servers: any[], connected: boolean) {
+    if (!connected) {
+    return (
+    <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '50px' }}>
+<p style={{ fontSize: '18px' }}>Соединение с бэкендом Rust устанавливается...</p>
+</div>
+);
+}
+
+    if (servers.length === 0) {
+    return (
+    <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '50px' }}>
+<p style={{ fontSize: '18px' }}>Подключено! Ожидание первых данных от бэкенда...</p>
+</div>
+);
+}
+
+    return (
+    <div className="server-grid">
+{servers.map((server) => {
+    const currentPoint = server.points[server.points.length - 1] || { cpu: 0, ram: 0 };
+
+    return (
+    <div key={server.id} className="server-card">
+<h3 style={{ marginTop: 0 }}>{server.name} (ID: {server.id})</h3>
+<p style={{ margin: '5px 0 15px' }}>
+Статус: <span style={{ color: server.status === 'online' ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>{server.status}</span>
+</p>
+
+<div className="metric-row">
+<span>CPU Usage:</span>
+<span className="metric-value metric-cpu">{currentPoint.cpu}%</span>
+</div>
+
+<div className="metric-row">
+<span>RAM Usage:</span>
+<span className="metric-value metric-ram">{currentPoint.ram}%</span>
+</div>
+
+<div style={{ marginTop: '15px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
+Точек в кэше: {server.points.length} / 30
+</div>
+</div>
+);
+})}
+</div>
+);
+}
+
+export default App;

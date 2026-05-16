@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: system_pulse_db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=123123
+      - POSTGRES_DB=system_pulse
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d system_pulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: system_pulse_backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://postgres:123123@db:5432/system_pulse
+      - RUST_LOG=info
+    depends_on:
+      db:
+        condition: service_healthy
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: system_pulse_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  agent:
+    build:
+      context: ./agents/rust-agents
+      dockerfile: Dockerfile
+    container_name: system_pulse_agent
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

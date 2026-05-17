@@ -52,7 +52,6 @@ async fn main() {
     tracing_subscriber::fmt::init();
     println!("Starting System Pulse Backend...");
 
-    // 1. Настройка реального пула подключений к PostgreSQL
     let db_host = std::env::var("DATABASE_HOST").unwrap_or_else(|_| "postgres".to_string());
     let db_url = format!("postgres://postgres:123123@{}:5432/system_pulse", db_host);
 
@@ -65,7 +64,6 @@ async fn main() {
         .expect("Failed to connect to Node Postgres Database");
     println!("Database is successfully connected!");
 
-    // Сниффер пакетов (пока симуляция)
     tokio::spawn(async {
         let mut packages_caught = 0;
         loop {
@@ -79,7 +77,6 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers(Any);
 
-    // 2. Инициализируем роуты авторизации и передаем пул базы данных в State
     let app = Router::new()
         .route("/api/ws", get(ws_handler))
         .route("/api/auth/register", post(register_handler))

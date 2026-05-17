@@ -17,5 +17,7 @@ sqlx = { version = "0.8.6", features = [
     "macros",
 ] }
 chrono = { version = "0.4", features = ["serde"] }
+jsonwebtoken = "10.4.0"
+bcrypt = "0.19.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"

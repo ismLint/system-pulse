@@ -8,10 +8,38 @@ use axum::{
     routing::get,
     Router,
 };
+use bcrypt::{hash, verify, DEFAULT_COST};
+use jsonwebtoken::{
+    encode,
+    decode,
+    Header,
+    Algorithm,
+    Validation,
+    EncodingKey,
+    DecodingKey
+};
+use chrono::{Utc, Duration as ChronoDuration};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
+
+const JWT_SECRET: &[u8] = b"system_pulse_mtuci";
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserTier {
+    Free,
+    Premium,
+    Admin,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, //username
+    tier: UserTier,
+    exp: usize, //life time token
+}
 
 #[derive(Deserialize)]
 struct WsParams {
@@ -35,15 +63,14 @@ async fn main() {
 
     let db_host = std::env::var("DATABASE_HOST").unwrap_or_else(|_| "postgres".to_string());
     println!("Connecting to database at address: postgres://postgres:123123@{}:5432/system_pulse...", db_host);
-    // Здесь должна быть твоя инициализация пула sqlx (например, PgPoolOptions)
     println!("Database is successfully connected!");
 
     tokio::spawn(async {
         let mut packages_caught = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
-            packages_caught += 42; // Симуляция перехваченных пакетов
-            println!("INFO system_pulse::network::sniffer: LOG [Network Sniffer]: Interface eth0 | Total incoming packages caught: {}", packages_caught);
+            packages_caught += 42; // simulate tokens
+            //println!("INFO system_pulse::network::sniffer: LOG [Network Sniffer]: Interface eth0 | Total incoming packages caught: {}", packages_caught);
         }
     });
 
@@ -76,11 +103,9 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
 ) -> impl IntoResponse {
-    // Извлекаем токен
     let token = params.token.unwrap_or_default();
 
-    // Отладочная mock-авторизация для пре-билда
-    if token == "debug_token_2026" || token == "test_admin" {
+    if token == "debug_token" || token == "test_admin" {
         println!("WebSocket Handshake: получен валидный отладочный токен. Апгрейд протокола разрешен.");
     } else if token.is_empty() {
         println!("WARN WebSocket Handshake: токен пуст. Отклонение соединения.");
@@ -90,7 +115,6 @@ async fn ws_handler(
         return (axum::http::StatusCode::UNAUTHORIZED, "Unauthorized: Invalid token").into_response();
     }
 
-    // Разрешаем Axum выполнить upgrade до WebSocket протокола
     ws.on_upgrade(move |socket| handle_socket(socket))
 }
 

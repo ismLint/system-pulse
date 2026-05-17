@@ -8,11 +8,11 @@ const { servers, connected } = useStats();
     return (
     <div className="dashboard-container">
 
-{/* Наша шапка с кнопками и статусом */}
+{/* шапка с кнопками и статусом */}
 <header className="header">
 <h2 style={{ margin: 0 }}>System Pulse Monitor</h2>
 
-{/* Блок кнопок Входа и Регистрации, о которых ты просил */}
+{/* Блок кнопок Входа и Регистрации*/}
 <div className="auth-buttons-container">
 <button className="btn btn-register" onClick={() => alert('Переход на регистрацию')}>Регистрация</button>
 <button className="btn btn-login" onClick={() => alert('Открытие формы входа')}>Войти</button>

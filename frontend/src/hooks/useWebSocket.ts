@@ -8,7 +8,7 @@ export type ServerInfo = {
   cpu_usage?: number;
   ram_usage?: number;
   cpu_temperature?: number;
-  // Добавляем массив точек, если захочешь накапливать историю для графиков
+  //здесь массив точек - для расширения чтобы накапливать историю графиков
   points?: Array<{ time: string; cpu: number; ram: number }>;
 };
 

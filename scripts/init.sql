@@ -15,7 +15,3 @@ CREATE TABLE metrics (
                          top_processes JSONB NOT NULL,
                          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
-
-INSERT INTO servers (id, name, status, updated_at)
-VALUES (1, 'Main-Production-Server', 'Healthy', NOW())
-ON CONFLICT (id) DO NOTHING;

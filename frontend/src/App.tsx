@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useStats } from './hooks/useStats';
 
 function App() {
-    // Вызываем наш отказоустойчивый хук
+    // Вызываем отказоустойчивый хук
     const { servers, connected } = useStats();
 
     return (

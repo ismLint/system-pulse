@@ -2,6 +2,7 @@ pub mod models;
 pub mod engine;
 pub mod api;
 pub mod network;
+pub mod auth;
 
 use tokio::sync::broadcast;
 use models::IncomingPacket;

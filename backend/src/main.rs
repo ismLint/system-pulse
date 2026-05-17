@@ -1,44 +1,35 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query,
+        Query, State,
     },
-    http::{header::{CONTENT_TYPE, AUTHORIZATION}, HeaderValue, Method},
+    http::StatusCode,
     response::IntoResponse,
-    routing::get,
-    Router,
+    routing::{get, post},
+    Json, Router,
 };
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{
-    encode,
-    decode,
-    Header,
-    Algorithm,
-    Validation,
-    EncodingKey,
-    DecodingKey
-};
-use chrono::{Utc, Duration as ChronoDuration};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
+use axum::http::Method;
 use tower_http::cors::{Any, CorsLayer};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 
-const JWT_SECRET: &[u8] = b"system_pulse_mtuci";
+mod auth; // Подключаем наш модуль auth.rs
+use auth::{generate_jwt, validate_jwt, check_and_update_tier, UserTier};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum UserTier {
-    Free,
-    Premium,
-    Admin,
+#[derive(Deserialize)]
+struct AuthRequest {
+    username: String,
+    password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    sub: String, //username
+#[derive(Serialize)]
+struct AuthResponse {
+    token: String,
+    username: String,
     tier: UserTier,
-    exp: usize, //life time token
 }
 
 #[derive(Deserialize)]
@@ -61,16 +52,25 @@ async fn main() {
     tracing_subscriber::fmt::init();
     println!("Starting System Pulse Backend...");
 
+    // 1. Настройка реального пула подключений к PostgreSQL
     let db_host = std::env::var("DATABASE_HOST").unwrap_or_else(|_| "postgres".to_string());
-    println!("Connecting to database at address: postgres://postgres:123123@{}:5432/system_pulse...", db_host);
+    let db_url = format!("postgres://postgres:123123@{}:5432/system_pulse", db_host);
+
+    println!("Connecting to database at address: {}...", db_url);
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to Node Postgres Database");
     println!("Database is successfully connected!");
 
+    // Сниффер пакетов (пока симуляция)
     tokio::spawn(async {
         let mut packages_caught = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
-            packages_caught += 42; // simulate tokens
-            //println!("INFO system_pulse::network::sniffer: LOG [Network Sniffer]: Interface eth0 | Total incoming packages caught: {}", packages_caught);
+            packages_caught += 42;
         }
     });
 
@@ -79,8 +79,12 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers(Any);
 
+    // 2. Инициализируем роуты авторизации и передаем пул базы данных в State
     let app = Router::new()
         .route("/api/ws", get(ws_handler))
+        .route("/api/auth/register", post(register_handler))
+        .route("/api/auth/login", post(login_handler))
+        .with_state(pool)
         .layer(cors);
 
     let server_port = std::env::var("SERVER_PORT").unwrap_or_else(|_| "8080".to_string());
@@ -99,34 +103,109 @@ async fn main() {
         .expect("Failed to start axum server");
 }
 
+async fn register_handler(
+    State(pool): State<PgPool>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if payload.username.trim().is_empty() || payload.password.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Поля не могут быть пустыми".to_string()));
+    }
+
+    let hashed = bcrypt::hash(payload.password, bcrypt::DEFAULT_COST)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Ошибка хэширования".to_string()))?;
+
+    let result = sqlx::query!(
+        "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
+        payload.username,
+        hashed
+    )
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => Ok((StatusCode::CREATED, "Пользователь успешно создан".to_string())),
+        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+            Err((StatusCode::CONFLICT, "Имя пользователя уже занято".to_string()))
+        }
+        Err(_) => Err((StatusCode::INTERNAL_SERVER_ERROR, "Ошибка базы данных".to_string())),
+    }
+}
+
+async fn login_handler(
+    State(pool): State<PgPool>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let user = sqlx::query!(
+        r#"SELECT username, password_hash, tier as "tier: String", premium_expires_at FROM users WHERE username = $1"#,
+        payload.username
+    )
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Ошибка бд".to_string()))?;
+
+    if let Some(user_data) = user {
+        let is_valid = bcrypt::verify(payload.password, &user_data.password_hash)
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Ошибка валидации".to_string()))?;
+
+        let db_tier_str = user_data.tier.as_deref().unwrap_or("free");
+
+        if is_valid {
+            let actual_tier = check_and_update_tier(
+                &pool,
+                &user_data.username,
+                &db_tier_str,
+                user_data.premium_expires_at,
+            ).await;
+
+            let token = generate_jwt(&user_data.username, actual_tier.clone())
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Ошибка токена".to_string()))?;
+
+            return Ok(Json(AuthResponse {
+                token,
+                username: user_data.username,
+                tier: actual_tier,
+            }));
+        }
+    }
+
+    Err((StatusCode::UNAUTHORIZED, "Неверные учетные данные".to_string()))
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
 ) -> impl IntoResponse {
     let token = params.token.unwrap_or_default();
 
+    // Поддерживаем отладочный режим для обратной совместимости
     if token == "debug_token" || token == "test_admin" {
-        println!("WebSocket Handshake: получен валидный отладочный токен. Апгрейд протокола разрешен.");
-    } else if token.is_empty() {
-        println!("WARN WebSocket Handshake: токен пуст. Отклонение соединения.");
-        return (axum::http::StatusCode::UNAUTHORIZED, "Unauthorized: Token is missing").into_response();
-    } else {
-        println!("WARN WebSocket Handshake: неверный токен '{}'. Отклонение соединения.", token);
-        return (axum::http::StatusCode::UNAUTHORIZED, "Unauthorized: Invalid token").into_response();
+        println!("WebSocket Handshake: отладочный токен.");
+        return ws.on_upgrade(move |socket| handle_socket(socket, UserTier::Admin));
     }
 
-    ws.on_upgrade(move |socket| handle_socket(socket))
+    if let Some((username, tier)) = validate_jwt(&token) {
+        println!("WebSocket Handshake: {} (Тариф: {:?}) успешно авторизован!", username, tier);
+        ws.on_upgrade(move |socket| handle_socket(socket, tier))
+    } else {
+        println!("WARN WebSocket Handshake: ошибка авторизации по JWT.");
+        (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+    }
 }
 
-async fn handle_socket(mut socket: WebSocket) {
+async fn handle_socket(mut socket: WebSocket, tier: UserTier) {
     println!("WebSocket-сессия успешно открыта с клиентом!");
+
+    let interval = match tier {
+        UserTier::Free => Duration::from_secs(5),
+        UserTier::Premium | UserTier::Admin => Duration::from_secs(1),
+    };
 
     loop {
         let mock_metrics = ServerInfo {
             server_id: 1,
             server_name: "Test node".to_string(),
             status: "online".to_string(),
-            cpu_usage: 24.5,  
+            cpu_usage: 24.5,
             ram_usage: 61.2,
             cpu_temperature: 48.0,
         };
@@ -138,6 +217,6 @@ async fn handle_socket(mut socket: WebSocket) {
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(interval).await;
     }
 }

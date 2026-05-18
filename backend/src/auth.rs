@@ -36,14 +36,12 @@ pub fn generate_jwt(username: &str, tier: UserTier) -> Result<String, jsonwebtok
     encode(&Header::default(), &claims, &EncodingKey::from_secret(JWT_SECRET))
 }
 
-pub fn validate_jwt(token: &str) -> Option<(String, UserTier)> {
+pub fn validate_jwt(token: &str) -> Result<(String, UserTier), jsonwebtoken::errors::Error> {
     let validation = Validation::new(Algorithm::HS256);
     decode::<Claims>(token, &DecodingKey::from_secret(JWT_SECRET), &validation)
         .map(|data| (data.claims.sub, data.claims.tier))
-        .ok()
 }
 
-/// Проверяет статус подписки в базе данных и сбрасывает её на free, если время истекло
 pub async fn check_and_update_tier(
     pool: &PgPool,
     username: &str,

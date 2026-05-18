@@ -1,3 +1,4 @@
+//basic import for http server
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -16,7 +17,7 @@ use tower_http::cors::{Any, CorsLayer};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
-mod auth; // Подключаем наш модуль auth.rs
+mod auth; // connect auth.rs and its classes
 use auth::{generate_jwt, validate_jwt, check_and_update_tier, UserTier};
 
 #[derive(Deserialize)]
@@ -51,18 +52,37 @@ struct ServerInfo {
 async fn main() {
     tracing_subscriber::fmt::init();
     println!("Starting System Pulse Backend...");
+    dotenvy::dotenv().ok();
 
     let db_host = std::env::var("DATABASE_HOST").unwrap_or_else(|_| "postgres".to_string());
     let db_url = format!("postgres://postgres:123123@{}:5432/system_pulse", db_host);
 
     println!("Connecting to database at address: {}...", db_url);
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(3))
-        .connect(&db_url)
-        .await
-        .expect("Failed to connect to Node Postgres Database");
-    println!("Database is successfully connected!");
+    let db_url = std::env::var("DATABASE_URL")
+        .expect("Переменная окружения DATABASE_URL не задана");
+    let mut pool_result = None;
+    for i in 1..=5 {
+        println!("Попытка подключения к БД #{}...", i);
+        match PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(Duration::from_secs(3))
+            .connect(&db_url)
+            .await
+        {
+            Ok(p) => {
+                pool_result = Some(p);
+                break;
+            }
+            Err(e) => {
+                if i == 5 {
+                    panic!("Не удалось подключиться к БД после 5 попыток: {:?}", e);
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+    let pool = pool_result.unwrap();
+    println!("Database successfully connected. Database URL: {}.", db_url);
 
     tokio::spawn(async {
         let mut packages_caught = 0;
@@ -172,20 +192,29 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
 ) -> impl IntoResponse {
-    let token = params.token.unwrap_or_default();
+    let mut token = params.token.unwrap_or_default();
 
-    // Поддерживаем отладочный режим для обратной совместимости
-    if token == "debug_token" || token == "test_admin" {
-        println!("WebSocket Handshake: отладочный токен.");
+    token = token.trim().to_string();
+
+    if token.starts_with("Bearer ") {
+        token = token.trim_start_matches("Bearer ").trim().to_string();
+    }
+
+    // support debug mode for backward compatibility
+    if token == "debug_token_2026" || token == "test_admin" {
+        println!("WebSocket Handshake: debug token.");
         return ws.on_upgrade(move |socket| handle_socket(socket, UserTier::Admin));
     }
 
-    if let Some((username, tier)) = validate_jwt(&token) {
-        println!("WebSocket Handshake: {} (Тариф: {:?}) успешно авторизован!", username, tier);
-        ws.on_upgrade(move |socket| handle_socket(socket, tier))
-    } else {
-        println!("WARN WebSocket Handshake: ошибка авторизации по JWT.");
-        (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+    match validate_jwt(&token) {
+        Ok((username, tier)) => {
+            println!("WebSocket Handshake: {} (Тариф: {:?}) успешно авторизован!", username, tier);
+            ws.on_upgrade(move |socket| handle_socket(socket, tier))
+        }
+        Err(err) => {
+            println!("WARN WebSocket Handshake: ошибка авторизации по JWT. Причина: {:?}", err);
+            (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+        }
     }
 }
 

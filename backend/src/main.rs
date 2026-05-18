@@ -19,6 +19,10 @@ use sqlx::PgPool;
 
 mod auth; // connect auth.rs and its classes
 use auth::{generate_jwt, validate_jwt, check_and_update_tier, UserTier};
+mod servers; //connect servers.rs and its classes
+use servers::{get_servers_handler, add_server_handler};
+mod metrics; //connect metrics.rs and it classes
+use metrics::{save_metrics_handler};
 
 #[derive(Deserialize)]
 struct AuthRequest {
@@ -101,6 +105,8 @@ async fn main() {
         .route("/api/ws", get(ws_handler))
         .route("/api/auth/register", post(register_handler))
         .route("/api/auth/login", post(login_handler))
+        .route("/api/servers", get(get_servers_handler).post(add_server_handler))
+        .route("/api/metrics", post(save_metrics_handler))
         .with_state(pool)
         .layer(cors);
 
@@ -201,7 +207,7 @@ async fn ws_handler(
     }
 
     // support debug mode for backward compatibility
-    if token == "debug_token_2026" || token == "test_admin" {
+    if token == "debug_token" || token == "test_admin" {
         println!("WebSocket Handshake: debug token.");
         return ws.on_upgrade(move |socket| handle_socket(socket, UserTier::Admin));
     }

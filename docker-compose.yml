@@ -10,6 +10,7 @@ services:
       - POSTGRES_DB=system_pulse
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d system_pulse"]
       interval: 5s
@@ -47,6 +48,8 @@ services:
       context: ./agents/rust-agents
       dockerfile: Dockerfile
     container_name: system_pulse_agent
+    environment:
+      - BACKEND_URL=http://system_pulse_backend:8080/api/metrics
     depends_on:
       - backend
 

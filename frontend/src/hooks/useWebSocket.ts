@@ -18,14 +18,14 @@ export function useStats() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Вытаскиваем токен. Если его нет — заменяем на тестовый 'test_admin',
+    // Вытаскиваем токен. Если его нет — заменяем на тестовый - ничего (18.05.26 20:54),
     // чтобы бэкенд Axum не закрывал соединение из-за пустого параметра.
-    const token = localStorage.getItem('token') || 'test_admin';
+    const token = localStorage.getItem('token') || '';
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-    // Стучимся строго по IP 127.0.0.1, чтобы избежать проблем с резолвом localhost в Docker
-    const wsUrl = `${wsProtocol}//127.0.0.1:8080/api/ws?token=${encodeURIComponent(token)}`;
+    // Стучимся строго по IP 127.0.0.1, чтобы избежать проблем с резолвом localhost в докеере
+    const wsUrl = `ws://localhost:8080/api/ws?token=${encodeURIComponent(token)}`;
 
     console.log("Попытка сокет-соединения с:", wsUrl);
     const socket = new WebSocket(wsUrl);

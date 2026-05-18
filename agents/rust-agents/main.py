@@ -1,134 +1,83 @@
 import os
-import asyncio
-from datetime import datetime
-import psutil
-import httpx
-from random import randint
-from fastapi import FastAPI
+import time
+import requests
+from ssh_manager import SSHManager
 
-app = FastAPI()
+# URL бэкенда берем строго из окружения (без дублирования путей)
+BACKEND_BASE_URL = os.getenv("BACKEND_URL", "http://system_pulse_backend:8080/api")
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080")
-DESTINATION_URL = f"{BACKEND_URL}/api/metrics"
+# Эндпоинты
+SERVERS_ENDPOINT = f"{BACKEND_BASE_URL}/servers"
+METRICS_ENDPOINT = f"{BACKEND_BASE_URL}/metrics"
 
-SERVER_ID = 1
-
-def write_log(message: str):
-    """Безопасное логирование в файл"""
+def get_monitored_servers():
+    """Запрашивает у бэкенда список серверов для мониторинга"""
     try:
-        os.makedirs("logs", exist_ok=True)
-        with open("logs/agent_logs.json", "a", encoding="utf-8") as log_file:
-            log_file.write(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} - {message}\n')
-    except Exception as e:
-        print(f"Ошибка записи лога: {e}")
+        response = requests.get(SERVERS_ENDPOINT, timeout=5)
+        if response.status_code == 200:
+            return response.json()  # Ожидаем массив [{id, host, username, password}, ...]
+        else:
+            print(f"[Agent] Не удалось получить список серверов. Статус: {response.status_code}")
+            return []
+    except requests.exceptions.RequestException as e:
+        print(f"[Agent] Ошибка сети при запросе списка серверов: {e}")
+        return []
 
-@app.get('/metrics')
-def get_metric_endpoint():
-    """Эндпоинт FastAPI (если фронт захочет дергать агент напрямую)"""
-    mem = psutil.virtual_memory()
-    cpu = psutil.cpu_percent(interval=None)
-    disk = psutil.disk_usage('/')
-
-    return {
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'server_id': SERVER_ID,
-        'cpu_usage': cpu,
-        'memory_usage': {
-            'total': mem.total,
-            'used': mem.used,
-            'free': mem.free,
-        },
-        'disk_usage': {
-            'total': disk.total,
-            'used': disk.used,
-            'free': disk.free,
-        }
-    }
-
-async def send_to_server(client: httpx.AsyncClient, payload: dict):
-    """Общая функция отправки данных на Rust-бэкенд"""
+def send_metrics(metrics_data):
+    """Отправляет собранные метрики конкретного сервера на бэкенд"""
     try:
-        response = await client.post(DESTINATION_URL, json=payload, timeout=5)
-        log_msg = f"Отправка на {DESTINATION_URL}. Статус: {response.status_code}"
-        print(log_msg)
-        write_log(log_msg)
-    except httpx.ConnectError:
-        print(f"Ошибка подключения к бэкенду {DESTINATION_URL}")
-        write_log("Ошибка подключения: Сервер недоступен")
-    except httpx.TimeoutException:
-        print("Таймаут при отправке метрик")
+        response = requests.post(METRICS_ENDPOINT, json=metrics_data, timeout=5)
+        if response.status_code == 200:
+            print(f"[Agent] Метрики для сервера ID {metrics_data['server_id']} успешно отправлены.")
+        else:
+            print(f"[Agent] Бэкенд не принял метрики (Статус: {response.status_code})")
+    except requests.exceptions.RequestException as e:
+        print(f"[Agent] Ошибка отправки метрик: {e}")
 
-async def agent_run_loop(client: httpx.AsyncClient):
-    """Асинхронный цикл сбора системных метрик"""
-    print("Запущен сбор системных метрик...")
-    batch = []
+def main():
+    print("[Agent] Универсальный агент мониторинга запущен...")
+
+    # Хранилище активных SSH-сессий, чтобы не переподключаться каждую секунду
+    active_connections = {}
 
     while True:
-        mem = psutil.virtual_memory()
-        cpu = psutil.cpu_percent(interval=None)
-        disk = psutil.disk_usage('/')
+        # Каждый цикл запрашиваем свежий список из базы (на случай, если пользователь добавил/удалил сервер)
+        servers = get_monitored_servers()
 
-        metric = {
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'server_id': SERVER_ID,
-            'cpu_usage': cpu,
-            'memory_used': mem.used,
-            'memory_total': mem.total,
-            'disk_used': disk.used,
-            'disk_total': disk.total
-        }
+        if not servers:
+            print("[Agent] Список серверов пуст. Ожидание 10 секунд...")
+            time.sleep(10)
+            continue
 
-        batch.append(metric)
+        for server in servers:
+            srv_id = server.get("id")
+            host = server.get("host")
+            user = server.get("username")
+            password = server.get("password")
 
-        if len(batch) >= 10:
-            print(f'Батч системных метрик заполнен ({len(batch)}). Отправка...')
-            payload = {
-                'server_id': SERVER_ID,
-                'metrics': batch
-            }
-            await send_to_server(client, payload)
-            batch = []
+            # Если сессии еще нет, создаем её
+            if srv_id not in active_connections:
+                active_connections[srv_id] = SSHManager(hostname=host, username=user, password=password)
 
-        await asyncio.sleep(1)
-
-async def critical_processes_loop(client: httpx.AsyncClient):
-    """Асинхронный цикл сбора топ-процессов по CPU"""
-    print("Запущен мониторинг топ-процессов...")
-
-    while True:
-        process_list = []
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
             try:
-                if proc.info['cpu_percent'] > 0.0:
-                    process_list.append({
-                        'pid': proc.info['pid'],
-                        'name': proc.info['name'],
-                        'cpu_percent': proc.info['cpu_percent'],
-                        'memory_percent': proc.info['memory_percent']
-                    })
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+                print(f"[Agent] Опрос сервера {host} (ID: {srv_id})...")
+                ssh_client = active_connections[srv_id]
 
-        sorted_processes = sorted(process_list, key=lambda x: x['cpu_percent'], reverse=True)[:5]
+                # Собираем реальные данные с Ubuntu через SSH
+                metrics = ssh_client.get_real_metrics()
+                metrics["server_id"] = srv_id  # Привязываем ID из базы данных
 
-        if sorted_processes:
-            payload = {
-                'server_id': SERVER_ID,
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'top_processes': sorted_processes
-            }
-            await send_to_server(client, payload)
-        await asyncio.sleep(5)
+                # Пушим на бэкенд
+                send_metrics(metrics)
 
-async def main():
-    async with httpx.AsyncClient() as client:
-        await asyncio.gather(
-            agent_run_loop(client),
-            critical_processes_loop(client)
-        )
+            except Exception as e:
+                print(f"[Agent] Ошибка опроса сервера {host}: {e}")
+                # Если упал коннект, закрываем и удаляем из активных, чтобы переподключиться в следующем цикле
+                active_connections[srv_id].close()
+                del active_connections[srv_id]
 
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print('Агент остановлен пользователем')
+        # Интервал между полными кругами опроса всех серверов
+        time.sleep(5)
+
+if __name__ == "__main__":
+    main()

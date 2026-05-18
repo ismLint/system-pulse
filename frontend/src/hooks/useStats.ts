@@ -16,7 +16,7 @@ export function useStats() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token') || 'debug_token_2026';
+    const token = localStorage.getItem('token') || 'debug_token';
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
     // 1. Обязательно сначала ОБЪЯВЛЯЕМ wsUrl через const
